@@ -7,3 +7,5 @@ langchain
 python-jose
 requests
 pandas
+uvicorn[standard]
+gunicorn
