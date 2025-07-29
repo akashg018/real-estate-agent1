@@ -10,10 +10,15 @@ from agents.orchestrator import OrchestratorAgent
 # Load environment variables
 load_dotenv()
 
-# Configure logging
+# Configure logging for production
+log_level = logging.INFO if os.getenv('FLASK_ENV') == 'production' else logging.DEBUG
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=log_level,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log', mode='a') if os.getenv('FLASK_ENV') == 'production' else logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -21,31 +26,44 @@ def create_app():
     """Application factory pattern"""
     app = Flask(__name__)
     
-    # Configure CORS
-    CORS(app, resources={
+    # Production-ready CORS configuration
+    allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
+    cors_config = {
         r"/api/*": {
-            "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+            "origins": allowed_origins,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"]
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "supports_credentials": True
         }
-    })
+    }
     
-    # Initialize database
+    CORS(app, resources=cors_config)
+    logger.info(f"CORS configured for origins: {allowed_origins}")
+    
+    # Global orchestrator instance
+    orchestrator = None
+    
+    def get_orchestrator():
+        """Get or initialize orchestrator instance"""
+        nonlocal orchestrator
+        if orchestrator is None:
+            try:
+                orchestrator = OrchestratorAgent()
+                logger.info("Orchestrator initialized successfully")
+            except Exception as e:
+                logger.error(f"Orchestrator initialization failed: {e}")
+                raise
+        return orchestrator
+    
+    # Initialize database on startup
     try:
         init_db()
         logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        raise
+        # Don't raise here - let the app start and handle errors gracefully
     
-    # Initialize orchestrator
-    try:
-        orchestrator = OrchestratorAgent()
-        logger.info("Orchestrator initialized successfully")
-    except Exception as e:
-        logger.error(f"Orchestrator initialization failed: {e}")
-        raise
-    
+    # Error handlers
     @app.errorhandler(404)
     def not_found(error):
         return jsonify({
@@ -56,41 +74,61 @@ def create_app():
     
     @app.errorhandler(500)
     def internal_error(error):
+        logger.error(f"Internal server error: {error}")
         return jsonify({
             "status": "error",
             "message": "Internal server error",
             "timestamp": datetime.now().isoformat()
         }), 500
     
+    @app.errorhandler(400)
+    def bad_request(error):
+        return jsonify({
+            "status": "error",
+            "message": "Bad request",
+            "timestamp": datetime.now().isoformat()
+        }), 400
+    
+    # Health check endpoint
     @app.route('/api/health', methods=['GET'])
     def health_check():
         """Health check endpoint"""
+        try:
+            # Test database connection
+            init_db()
+            db_status = "connected"
+        except Exception as e:
+            db_status = f"error: {str(e)}"
+            logger.error(f"Database health check failed: {e}")
+        
+        try:
+            # Test orchestrator
+            orch = get_orchestrator()
+            orchestrator_status = "initialized"
+        except Exception as e:
+            orchestrator_status = f"error: {str(e)}"
+            logger.error(f"Orchestrator health check failed: {e}")
+        
         return jsonify({
             "status": "success",
             "message": "Real Estate AI Agent is running",
             "timestamp": datetime.now().isoformat(),
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "database": db_status,
+            "orchestrator": orchestrator_status,
+            "environment": os.getenv('FLASK_ENV', 'development')
         })
     
     @app.route('/api/chat', methods=['POST'])
     def chat():
         try:
-            print("🚀" + "="*50)
-            print("🚀 FRONTEND REQUEST RECEIVED")
-            print("🚀" + "="*50)
-            
-            # Log request details
-            print(f"📍 Request method: {request.method}")
-            print(f"📍 Request headers: {dict(request.headers)}")
-            print(f"📍 Request origin: {request.headers.get('Origin', 'Not specified')}")
-            print(f"📍 Content-Type: {request.headers.get('Content-Type', 'Not specified')}")
+            # Production logging (less verbose)
+            if os.getenv('FLASK_ENV') != 'production':
+                logger.info("Chat request received")
             
             data = request.get_json()
-            print(f"📍 Raw request data: {data}")
-            print(f"📍 Data type: {type(data)}")
-            
             if not data or 'query' not in data:
-                print("❌ No query in request")
+                logger.warning("Chat request missing query parameter")
                 return jsonify({
                     "status": "error",
                     "message": "Query is required",
@@ -98,80 +136,84 @@ def create_app():
                 }), 400
             
             user_query = data['query'].strip()
-            print(f"📝 Processing query: '{user_query}'")
-            print(f"📝 Query type: {type(user_query)}")
-            print(f"📝 Query length: {len(user_query)}")
-            
-            # Test orchestrator existence
-            print(f"🔧 Orchestrator type: {type(orchestrator)}")
-            print(f"🔧 Orchestrator methods: {dir(orchestrator)}")
-            
-            if not hasattr(orchestrator, 'handle_query'):
-                print("❌ ERROR: Orchestrator missing handle_query method")
+            if not user_query:
                 return jsonify({
                     "status": "error",
-                    "message": "Orchestrator not properly configured",
+                    "message": "Query cannot be empty",
                     "timestamp": datetime.now().isoformat()
-                }), 500
+                }), 400
             
-            # Call orchestrator with detailed logging
-            print("⚡ Calling orchestrator.handle_query()...")
+            if len(user_query) > 1000:  # Reasonable limit
+                return jsonify({
+                    "status": "error",
+                    "message": "Query too long (max 1000 characters)",
+                    "timestamp": datetime.now().isoformat()
+                }), 400
+            
+            logger.info(f"Processing query: {user_query[:50]}...")
+            
             try:
-                response = orchestrator.handle_query(user_query)
-                print(f"✅ Orchestrator response type: {type(response)}")
-                print(f"✅ Orchestrator response: {response}")
+                orch = get_orchestrator()
                 
-                # Validate response structure
-                if not isinstance(response, dict):
-                    print(f"❌ Invalid response type: {type(response)}")
+                if not hasattr(orch, 'handle_query'):
+                    logger.error("Orchestrator missing handle_query method")
                     return jsonify({
                         "status": "error",
-                        "message": "Invalid response format",
+                        "message": "Service temporarily unavailable",
                         "timestamp": datetime.now().isoformat()
-                    }), 500
+                    }), 503
                 
-                # Ensure response has required fields
-                if 'status' not in response:
-                    response['status'] = 'error'
-                if 'message' not in response:
-                    response['message'] = 'No message provided'
-                if 'data' not in response:
-                    response['data'] = {}
-                if 'timestamp' not in response:
-                    response['timestamp'] = datetime.now().isoformat()
+                response = orch.handle_query(user_query)
                 
-                print(f"🎉 Sending response to frontend: {response}")
+                # Validate and standardize response
+                if not isinstance(response, dict):
+                    logger.error(f"Invalid response type from orchestrator: {type(response)}")
+                    response = {
+                        "status": "error",
+                        "message": "Invalid response format",
+                        "data": {},
+                        "timestamp": datetime.now().isoformat()
+                    }
+                else:
+                    # Ensure required fields
+                    response.setdefault('status', 'success')
+                    response.setdefault('message', 'Query processed successfully')
+                    response.setdefault('data', {})
+                    response.setdefault('timestamp', datetime.now().isoformat())
+                
+                logger.info("Query processed successfully")
                 return jsonify(response)
                 
             except Exception as orchestrator_error:
-                print(f"💥 ORCHESTRATOR ERROR: {str(orchestrator_error)}")
-                print(f"💥 Error type: {type(orchestrator_error)}")
-                import traceback
-                traceback.print_exc()
-                
+                logger.error(f"Orchestrator error: {str(orchestrator_error)}")
                 return jsonify({
                     "status": "error",
-                    "message": f"Orchestrator failed: {str(orchestrator_error)}",
+                    "message": "Failed to process your request. Please try again.",
                     "timestamp": datetime.now().isoformat()
                 }), 500
             
         except Exception as e:
-            print(f"💥 CRITICAL ERROR: {str(e)}")
-            print(f"💥 Error type: {type(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Chat endpoint error: {str(e)}")
             return jsonify({
                 "status": "error",
-                "message": f"Server error: {str(e)}",
+                "message": "Server error occurred",
                 "timestamp": datetime.now().isoformat()
             }), 500
-
     
     @app.route('/api/property/<int:property_id>', methods=['GET'])
     def get_property_details(property_id):
         """Get detailed information about a specific property"""
         try:
-            property_data = orchestrator.db_manager.get_property(property_id)
+            if property_id <= 0:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid property ID",
+                    "timestamp": datetime.now().isoformat()
+                }), 400
+            
+            orch = get_orchestrator()
+            property_data = orch.db_manager.get_property(property_id)
+            
             if not property_data:
                 return jsonify({
                     "status": "error",
@@ -198,7 +240,15 @@ def create_app():
     def get_property_amenities(property_id):
         """Get amenities for a specific property"""
         try:
-            response = orchestrator.get_property_amenities(property_id)
+            if property_id <= 0:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid property ID",
+                    "timestamp": datetime.now().isoformat()
+                }), 400
+            
+            orch = get_orchestrator()
+            response = orch.get_property_amenities(property_id)
             return jsonify(response)
             
         except Exception as e:
@@ -213,6 +263,13 @@ def create_app():
     def negotiate_property(property_id):
         """Handle property price negotiation"""
         try:
+            if property_id <= 0:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid property ID",
+                    "timestamp": datetime.now().isoformat()
+                }), 400
+            
             data = request.get_json()
             if not data or 'offer' not in data:
                 return jsonify({
@@ -221,16 +278,21 @@ def create_app():
                     "timestamp": datetime.now().isoformat()
                 }), 400
             
-            offer_amount = float(data['offer'])
-            response = orchestrator.handle_negotiation(property_id, offer_amount)
+            try:
+                offer_amount = float(data['offer'])
+                if offer_amount <= 0:
+                    raise ValueError("Offer must be positive")
+            except (ValueError, TypeError):
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid offer amount",
+                    "timestamp": datetime.now().isoformat()
+                }), 400
+            
+            orch = get_orchestrator()
+            response = orch.handle_negotiation(property_id, offer_amount)
             return jsonify(response)
             
-        except ValueError:
-            return jsonify({
-                "status": "error",
-                "message": "Invalid offer amount",
-                "timestamp": datetime.now().isoformat()
-            }), 400
         except Exception as e:
             logger.error(f"Negotiation error: {str(e)}")
             return jsonify({
@@ -243,8 +305,16 @@ def create_app():
     def close_deal(property_id):
         """Finalize property deal and update database"""
         try:
+            if property_id <= 0:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid property ID",
+                    "timestamp": datetime.now().isoformat()
+                }), 400
+            
             data = request.get_json() or {}
-            response = orchestrator.close_deal(property_id, data)
+            orch = get_orchestrator()
+            response = orch.close_deal(property_id, data)
             return jsonify(response)
             
         except Exception as e:
@@ -265,4 +335,7 @@ if __name__ == '__main__':
     debug_mode = os.getenv('FLASK_ENV') == 'development'
     
     logger.info(f"Starting Real Estate AI Agent on port {port}")
+    logger.info(f"Environment: {os.getenv('FLASK_ENV', 'development')}")
+    logger.info(f"Debug mode: {debug_mode}")
+    
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
