@@ -1,7 +1,7 @@
-// Enhanced realEstateService.js with comprehensive debugging
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// Configure base URL with fallback
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
 
 // Configure axios defaults
 axios.defaults.timeout = 30000; // 30 seconds
@@ -9,27 +9,24 @@ axios.defaults.headers.common['Content-Type'] = 'application/json';
 
 class RealEstateService {
   constructor() {
-    console.log('🔧 RealEstateService: Constructor called');
-    console.log('🔧 API_BASE_URL:', API_BASE_URL);
-    this.setupInterceptors();
-  }
-
-  setupInterceptors() {
-    console.log('🔧 Setting up axios interceptors');
+    this.axios = axios.create({
+      baseURL: API_BASE_URL,
+      timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      }
+    });
     
     // Request interceptor
     axios.interceptors.request.use(
       (config) => {
-        console.log('📤 AXIOS REQUEST INTERCEPTOR:');
-        console.log('  📍 Method:', config.method?.toUpperCase());
-        console.log('  📍 URL:', config.url);
-        console.log('  📍 Headers:', config.headers);
-        console.log('  📍 Data:', config.data);
-        console.log('  📍 Timeout:', config.timeout);
+        // Minimal request logging
+        console.log(`📤 Request: [${config.method?.toUpperCase()}] ${config.url}`);
         return config;
       },
       (error) => {
-        console.error('❌ AXIOS REQUEST ERROR:', error);
+        console.error('❌ Request error:', error);
         return Promise.reject(error);
       }
     );
@@ -37,27 +34,12 @@ class RealEstateService {
     // Response interceptor
     axios.interceptors.response.use(
       (response) => {
-        console.log('📥 AXIOS RESPONSE INTERCEPTOR:');
-        console.log('  ✅ Status:', response.status);
-        console.log('  ✅ Status Text:', response.statusText);
-        console.log('  ✅ Headers:', response.headers);
-        console.log('  ✅ Data:', response.data);
+        // Minimal response logging
+        console.log(`📥 Response: [${response.status}] ${response.config.url}`);
         return response;
       },
       (error) => {
-        console.error('❌ AXIOS RESPONSE ERROR INTERCEPTOR:');
-        console.error('  💥 Error object:', error);
-        console.error('  💥 Error message:', error.message);
-        console.error('  💥 Error code:', error.code);
-        
-        if (error.response) {
-          console.error('  💥 Response status:', error.response.status);
-          console.error('  💥 Response data:', error.response.data);
-          console.error('  💥 Response headers:', error.response.headers);
-        } else if (error.request) {
-          console.error('  💥 Request made but no response:', error.request);
-        }
-        
+        console.error('❌ Response error:', error);
         return Promise.resolve({
           data: {
             status: 'error',
@@ -69,86 +51,84 @@ class RealEstateService {
     );
   }
 
-  async chatQuery(query) {
-    console.log('🚀 =================================');
-    console.log('🚀 CHAT QUERY STARTED');
-    console.log('🚀 =================================');
-    console.log('📝 Query received:', query);
-    console.log('📝 Query type:', typeof query);
-    console.log('📝 Query length:', query?.length);
-    console.log('🌐 Target URL:', `${API_BASE_URL}/chat`);
-    
+  async checkHealth() {
     try {
-      console.log('⏳ Making POST request...');
-      
-      const requestPayload = { query };
-      console.log('📦 Request payload:', requestPayload);
-      console.log('📦 Payload stringified:', JSON.stringify(requestPayload));
-      
-      const startTime = Date.now();
-      
-      const response = await axios.post(`${API_BASE_URL}/chat`, requestPayload, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        timeout: 30000
-      });
-      
-      const endTime = Date.now();
-      console.log(`⏱️ Request completed in ${endTime - startTime}ms`);
-      
-      console.log('✅ Raw response received:', response);
-      console.log('✅ Response data:', response.data);
-      console.log('✅ Response status:', response.status);
-      
-      const standardizedResponse = this.standardizeResponse(response.data);
-      console.log('✅ Standardized response:', standardizedResponse);
-      
-      console.log('🎉 =================================');
-      console.log('🎉 CHAT QUERY COMPLETED SUCCESSFULLY');
-      console.log('🎉 =================================');
-      
-      return standardizedResponse;
-      
+      const response = await axios.get(`${API_BASE_URL}/health`);
+      return response.data;
     } catch (error) {
-      console.log('💥 =================================');
-      console.log('💥 CHAT QUERY FAILED');
-      console.log('💥 =================================');
-      console.error('💥 Caught error:', error);
-      console.error('💥 Error name:', error.name);
-      console.error('💥 Error message:', error.message);
-      console.error('💥 Error stack:', error.stack);
-      
-      if (error.response) {
-        console.error('💥 Error response status:', error.response.status);
-        console.error('💥 Error response data:', error.response.data);
-        console.error('💥 Error response headers:', error.response.headers);
-      } else if (error.request) {
-        console.error('💥 Error request (no response received):', error.request);
-      }
-      
-      const errorResponse = this.handleError(error, 'Failed to process your request');
-      console.error('💥 Final error response:', errorResponse);
-      
-      return errorResponse;
+      console.error('Health check failed:', error);
+      throw error;
     }
   }
 
+  async chatQuery(query) {
+    console.log('🚀 CHAT QUERY STARTED');
+
+    const maxRetries = 3;
+    let retryCount = 0;
+    let lastError = null;
+
+    while (retryCount < maxRetries) {
+      try {
+        console.log(`⏳ Attempt ${retryCount + 1} of ${maxRetries}`);
+        const startTime = Date.now();
+        
+        const response = await axios.post(`${API_BASE_URL}/chat`, 
+          { query },
+          {
+            timeout: 10000,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            }
+          }
+        );
+
+        const endTime = Date.now();
+        console.log(`⏱️ Completed in ${endTime - startTime}ms`);
+        return this.standardizeResponse(response.data);
+
+      } catch (error) {
+        lastError = error;
+        retryCount++;
+        console.log(`❌ Attempt ${retryCount} failed:`, error.message);
+        
+        if (retryCount < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+          console.log(`⏳ Retry after ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    console.log('💥 All retry attempts failed');
+    return this.handleError(lastError, 'Failed after multiple attempts');
+  }
+
   async getPropertyAmenities(propertyId) {
-    console.log('🏢 =================================');
-    console.log('🏢 GET PROPERTY AMENITIES STARTED');
-    console.log('🏢 =================================');
-    console.log('🏢 Property ID:', propertyId);
+    console.log('🏢 Fetching amenities for property ID:', propertyId);
     
     try {
       const url = `${API_BASE_URL}/property/${propertyId}/amenities`;
-      console.log('🏢 Request URL:', url);
-      
       const response = await axios.get(url);
-      console.log('🏢 Amenities response:', response.data);
+      const data = response.data;
+
+      // Add debug logging
+      console.log('Amenities response:', data);
+
+      // Check if we need to extract amenities from nested data structure
+      const amenitiesData = data.data && data.data.amenities ? data.data.amenities : data.amenities;
       
-      return this.standardizeResponse(response.data);
+      return this.standardizeResponse({
+        status: data.status || 'success',
+        message: data.message || 'Amenities retrieved successfully',
+        data: {
+          amenities: amenitiesData || [],
+          property_info: data.data?.property_info || {},
+          amenity_score: data.data?.amenity_score || {}
+        },
+        timestamp: data.timestamp || new Date().toISOString()
+      });
     } catch (error) {
       console.error('💥 Amenities error:', error);
       return this.handleError(error, 'Failed to retrieve amenities');
@@ -156,11 +136,7 @@ class RealEstateService {
   }
 
   async negotiatePrice(propertyId, offer) {
-    console.log('💰 =================================');
-    console.log('💰 NEGOTIATE PRICE STARTED');
-    console.log('💰 =================================');
-    console.log('💰 Property ID:', propertyId);
-    console.log('💰 Offer amount:', offer);
+    console.log('💰 Negotiating price for property ID:', propertyId);
     
     try {
       if (!propertyId || !offer || offer <= 0) {
@@ -170,12 +146,7 @@ class RealEstateService {
       const url = `${API_BASE_URL}/property/${propertyId}/negotiate`;
       const payload = { offer: parseFloat(offer) };
       
-      console.log('💰 Request URL:', url);
-      console.log('💰 Request payload:', payload);
-      
       const response = await axios.post(url, payload);
-      console.log('💰 Negotiation response:', response.data);
-      
       return this.standardizeResponse(response.data);
     } catch (error) {
       console.error('💥 Negotiation error:', error);
@@ -184,11 +155,7 @@ class RealEstateService {
   }
 
   async finalizeDeal(propertyId, dealDetails = {}) {
-    console.log('🤝 =================================');
-    console.log('🤝 FINALIZE DEAL STARTED');
-    console.log('🤝 =================================');
-    console.log('🤝 Property ID:', propertyId);
-    console.log('🤝 Deal details:', dealDetails);
+    console.log('🤝 Finalizing deal for property ID:', propertyId);
     
     try {
       if (!propertyId) {
@@ -196,11 +163,7 @@ class RealEstateService {
       }
 
       const url = `${API_BASE_URL}/property/${propertyId}/close-deal`;
-      console.log('🤝 Request URL:', url);
-      
       const response = await axios.post(url, dealDetails);
-      console.log('🤝 Deal finalization response:', response.data);
-      
       return this.standardizeResponse(response.data);
     } catch (error) {
       console.error('💥 Deal finalization error:', error);
@@ -210,23 +173,18 @@ class RealEstateService {
 
   // Utility methods
   standardizeResponse(data) {
-    console.log('🔄 Standardizing response:', data);
-    
-    const standardized = {
+    // No logging needed here for normal operation
+    return {
       status: data.status || 'success',
       message: data.message || 'Success',
       data: data.data || data,
       timestamp: data.timestamp || new Date().toISOString()
     };
-    
-    console.log('🔄 Standardized result:', standardized);
-    return standardized;
   }
 
   handleError(error, defaultMessage) {
-    console.log('🚨 Handling error:', error);
-    console.log('🚨 Default message:', defaultMessage);
-    
+    console.error('🚨 Handling error:', error);
+
     let errorMessage = defaultMessage;
     
     if (error.response?.data?.message) {
@@ -235,21 +193,16 @@ class RealEstateService {
       errorMessage = error.message;
     }
 
-    const errorResponse = {
+    return {
       status: 'error',
       message: errorMessage,
       data: {},
       timestamp: new Date().toISOString()
     };
-    
-    console.log('🚨 Final error response:', errorResponse);
-    return errorResponse;
   }
 }
 
 // Create and export singleton instance
-console.log('🏗️ Creating RealEstateService instance...');
 const realEstateService = new RealEstateService();
-console.log('🏗️ RealEstateService instance created:', realEstateService);
 
 export default realEstateService;

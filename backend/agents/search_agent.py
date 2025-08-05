@@ -25,6 +25,15 @@ class PropertySearchAgent(BaseAgent):
             search_criteria = self._extract_search_criteria(user_query)
             logger.info(f"Extracted criteria: {search_criteria}")
             
+            # Add default property type if none specified
+            if 'property_type' not in search_criteria:
+                search_criteria['property_type'] = ['Apartment']
+            
+            # Ensure city is properly capitalized
+            if 'city' in search_criteria:
+                search_criteria['city'] = search_criteria['city'].title()
+                logger.info(f"Searching for city: {search_criteria['city']}")
+            
             # Step 2: Search database for matching properties
             properties = self.db_manager.search_properties(search_criteria)
             
@@ -79,18 +88,68 @@ class PropertySearchAgent(BaseAgent):
                 "required_amenities": ["gym", "hospital", "vet", "school", "university", "shopping"]
             }}
             
-            Extraction rules:
-            - "2BHK" or "2 bedroom" → "bedrooms": 2
-            - "$500k" or "budget 500000" → "max_price": 500000
-            - "under $600k" → "max_price": 600000
+            City name rules:
+            - "New York" or "New York City" → "city": "New York City", "state": "NY"
+            - "NYC" → "city": "New York City", "state": "NY"
             - "San Francisco" → "city": "San Francisco", "state": "CA"
-            - "California" → "state": "CA"
-            - "pet-friendly" → "pet_friendly": true
-            - "within 5 miles" → "max_amenity_distance": 5
-            - Mentioned amenities → add to required_amenities array
+            - "LA" or "Los Angeles" → "city": "Los Angeles", "state": "CA"
+            - "Chicago" → "city": "Chicago", "state": "IL"
+            - "Houston" → "city": "Houston", "state": "TX"
+            - Handle "near [city]" or "in [city]" or "around [city]" patterns
             
-            Only include fields explicitly mentioned in the query.
+            Property type rules:
+            - Default to ["Apartment"] if no type specified
+            - "house" → ["House"]
+            - "flat" or "apartment" → ["Apartment"]
+            - "condo" → ["Condo"]
+            - "any" or "all" → ["Apartment", "Condo", "House", "Townhouse"]
+            
+            Price rules:
+            - Convert "500k" to 500000
+            - "under/below/less than X" → "max_price": X
+            - "above/more than/over X" → "min_price": X
+            - "between X and Y" → set both min_price and max_price
+            - Handle ranges like "$400k-600k" or "$400,000 to $600,000"
+            
+            Special cases:
+            - For "show properties" or "show me properties" type queries with just a location,
+              return only city/state and property_type=["Apartment", "Condo", "House", "Townhouse"]
+            - Include default max_amenity_distance=5 if amenities are mentioned without distance
+            - For queries mentioning "available", focus on location and basic criteria only
             """
+            
+            default_structure = {
+                "property_type": ["Apartment", "Condo", "House", "Townhouse"]
+            }
+            
+            response = self.generate_structured_response_sync(criteria_prompt, default_structure)
+            
+            # Clean up and validate the response
+            if isinstance(response, dict):
+                # Ensure city names are properly formatted
+                if 'city' in response:
+                    # Handle special city names
+                    city_map = {
+                        'nyc': 'New York City',
+                        'new york': 'New York City',
+                        'sf': 'San Francisco',
+                        'la': 'Los Angeles',
+                    }
+                    city_name = response['city'].lower().strip()
+                    response['city'] = city_map.get(city_name, response['city'].title())
+                
+                # Ensure state codes are uppercase
+                if 'state' in response:
+                    response['state'] = response['state'].upper()
+                
+                # Set default property types for general searches
+                if 'property_type' not in response or not response['property_type']:
+                    response['property_type'] = ["Apartment", "Condo", "House", "Townhouse"]
+                
+                logger.info(f"Extracted search criteria: {response}")
+                return response
+            
+            return default_structure
             
             default_structure = {
                 "property_type": ["Apartment"],  # Default assumption

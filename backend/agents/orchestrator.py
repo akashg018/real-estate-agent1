@@ -23,6 +23,9 @@ class OrchestratorAgent:
             self.negotiation_agent = NegotiationAgent(self.db_manager)
             self.closing_agent = DealClosingAgent(self.db_manager)
             
+            # Track the currently selected property
+            self.selected_property_id = None
+            
             # Query patterns for intelligent routing
             self.query_patterns = {
                 'search': [
@@ -60,9 +63,20 @@ class OrchestratorAgent:
         try:
             logger.info(f"Handling query: {user_query}")
             
+            # Check if property ID is explicitly mentioned in query
+            property_id = self._extract_property_id(user_query)
+            if property_id:
+                self.selected_property_id = property_id
+            
             # Determine query intent
             intent = self._classify_query_intent(user_query)
             logger.info(f"Classified intent: {intent}")
+            
+            # Add selected property context to response
+            if self.selected_property_id:
+                property_data = self.db_manager.get_property(self.selected_property_id)
+                if property_data:
+                    user_query = f"{user_query} (regarding {property_data['property_type']} at {property_data['address']})"
             
             # Route to appropriate handler
             if intent == 'search':
@@ -210,6 +224,9 @@ class OrchestratorAgent:
     def get_property_amenities(self, property_id: int) -> Dict[str, Any]:
         """Get amenities for a specific property"""
         try:
+            # Update selected property
+            self.selected_property_id = property_id
+            
             response = self.amenities_agent.get_amenities(property_id)
             
             # Enhance with personalized message

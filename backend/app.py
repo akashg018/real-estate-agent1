@@ -26,19 +26,12 @@ def create_app():
     """Application factory pattern"""
     app = Flask(__name__)
     
-    # Production-ready CORS configuration
-    allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
-    cors_config = {
-        r"/api/*": {
-            "origins": allowed_origins,
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
-            "supports_credentials": True
-        }
-    }
+    # Simple CORS configuration for development and production
+    CORS(app, 
+         resources={r"/api/*": {"origins": "*"}},
+         supports_credentials=True)
     
-    CORS(app, resources=cors_config)
-    logger.info(f"CORS configured for origins: {allowed_origins}")
+    logger.info("CORS configured for API endpoints")
     
     # Global orchestrator instance
     orchestrator = None
@@ -327,15 +320,257 @@ def create_app():
     
     return app
 
-# Create app instance
-app = create_app()
+# Create the Flask application instance
+app = Flask(__name__)
+
+# Configure CORS
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+logger.info("CORS configured for API endpoints")
+
+# Global orchestrator instance
+orchestrator = None
+
+def get_orchestrator():
+    """Get or initialize orchestrator instance"""
+    global orchestrator
+    if orchestrator is None:
+        try:
+            orchestrator = OrchestratorAgent()
+            logger.info("Orchestrator initialized successfully")
+        except Exception as e:
+            logger.error(f"Orchestrator initialization failed: {e}")
+            raise
+    return orchestrator
+
+# Initialize database on startup
+try:
+    init_db()
+    logger.info("Database initialized successfully")
+except Exception as e:
+    logger.error(f"Database initialization failed: {e}")
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        "status": "error",
+        "message": "Endpoint not found",
+        "timestamp": datetime.now().isoformat()
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Internal server error: {error}")
+    return jsonify({
+        "status": "error",
+        "message": "Internal server error",
+        "timestamp": datetime.now().isoformat()
+    }), 500
+
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify({
+        "status": "error",
+        "message": "Bad request",
+        "timestamp": datetime.now().isoformat()
+    }), 400
+
+# Health check endpoint
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    try:
+        # Test database connection
+        init_db()
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+        logger.error(f"Database health check failed: {e}")
+    
+    try:
+        # Test orchestrator
+        orch = get_orchestrator()
+        orchestrator_status = "initialized"
+    except Exception as e:
+        orchestrator_status = f"error: {str(e)}"
+        logger.error(f"Orchestrator health check failed: {e}")
+    
+    return jsonify({
+        "status": "success",
+        "message": "Real Estate AI Agent is running",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+        "database": db_status,
+        "orchestrator": orchestrator_status,
+        "environment": os.getenv('FLASK_ENV', 'development')
+    })
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    try:
+        data = request.get_json()
+        if not data or 'query' not in data:
+            logger.warning("Chat request missing query parameter")
+            return jsonify({
+                "status": "error",
+                "message": "Query is required",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        user_query = data['query'].strip()
+        if not user_query:
+            return jsonify({
+                "status": "error",
+                "message": "Query cannot be empty",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        orch = get_orchestrator()
+        response = orch.handle_query(user_query)
+        
+        if not isinstance(response, dict):
+            response = {
+                "status": "success",
+                "message": "Query processed",
+                "data": response,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Chat endpoint error: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Server error occurred",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/property/<int:property_id>', methods=['GET'])
+def get_property_details(property_id):
+    try:
+        if property_id <= 0:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid property ID",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        orch = get_orchestrator()
+        property_data = orch.db_manager.get_property(property_id)
+        
+        if not property_data:
+            return jsonify({
+                "status": "error",
+                "message": f"Property {property_id} not found",
+                "timestamp": datetime.now().isoformat()
+            }), 404
+        
+        return jsonify({
+            "status": "success",
+            "message": "Property details retrieved",
+            "data": property_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Property details error: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to retrieve property details",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/property/<int:property_id>/amenities', methods=['GET'])
+def get_property_amenities(property_id):
+    try:
+        if property_id <= 0:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid property ID",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        orch = get_orchestrator()
+        response = orch.get_property_amenities(property_id)
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Amenities error: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to retrieve amenities",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/property/<int:property_id>/negotiate', methods=['POST'])
+def negotiate_property(property_id):
+    try:
+        if property_id <= 0:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid property ID",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        data = request.get_json()
+        if not data or 'offer' not in data:
+            return jsonify({
+                "status": "error",
+                "message": "Offer amount is required",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        offer_amount = float(data['offer'])
+        if offer_amount <= 0:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid offer amount",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        orch = get_orchestrator()
+        response = orch.handle_negotiation(property_id, offer_amount)
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Negotiation error: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to process negotiation",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/property/<int:property_id>/close-deal', methods=['POST'])
+def close_deal(property_id):
+    try:
+        if property_id <= 0:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid property ID",
+                "timestamp": datetime.now().isoformat()
+            }), 400
+        
+        data = request.get_json() or {}
+        orch = get_orchestrator()
+        response = orch.close_deal(property_id, data)
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Deal closing error: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to close deal",
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    debug_mode = os.getenv('FLASK_ENV') == 'development'
+    port = int(os.getenv('PORT', 4000))
+    debug_mode = os.getenv('FLASK_ENV') != 'production'
+    host = '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else 'localhost'
     
     logger.info(f"Starting Real Estate AI Agent on port {port}")
     logger.info(f"Environment: {os.getenv('FLASK_ENV', 'development')}")
     logger.info(f"Debug mode: {debug_mode}")
     
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    app.run(host=host, port=port, debug=debug_mode)
