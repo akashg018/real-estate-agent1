@@ -1,13 +1,9 @@
 import axios from 'axios';
 
-// Configure base URL to use deployed backend
+// FIXED: Ensure API base URL includes the /api prefix
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://real-estate-agent1-2.onrender.com/api';
 
 console.log('🔧 API Base URL configured:', API_BASE_URL);
-
-// Configure axios defaults
-axios.defaults.timeout = 15000; // 15 seconds
-axios.defaults.headers.common['Content-Type'] = 'application/json';
 
 class RealEstateService {
   constructor() {
@@ -41,7 +37,6 @@ class RealEstateService {
       (error) => {
         console.error('❌ Response error:', error.message);
         
-        // Return standardized error response
         const errorResponse = {
           data: {
             status: 'error',
@@ -62,6 +57,12 @@ class RealEstateService {
     if (error.code === 'ECONNABORTED') {
       return 'Request timeout. Please try again.';
     }
+    if (error.response?.status === 404) {
+      return 'API endpoint not found. Please check the URL configuration.';
+    }
+    if (error.response?.status === 405) {
+      return 'Method not allowed. The endpoint may not support this request method.';
+    }
     if (error.response?.data?.message) {
       return error.response.data.message;
     }
@@ -71,11 +72,11 @@ class RealEstateService {
   async checkHealth() {
     try {
       console.log('🏥 Checking health...');
-      const response = await this.axios.get('/health');
+      const response = await this.axios.get('/health'); // This will become /api/health
       return response.data;
     } catch (error) {
       console.error('💔 Health check failed:', error);
-      throw error;
+      return this.handleError(error, 'Health check failed');
     }
   }
 
@@ -91,9 +92,9 @@ class RealEstateService {
         console.log(`⏳ Attempt ${retryCount + 1} of ${maxRetries}`);
         const startTime = Date.now();
         
-        // Use 'message' to match your updated backend
+        // This will become /api/chat with the corrected base URL
         const response = await this.axios.post('/chat', 
-          { message: query }, // Fixed: use 'message' instead of 'query'
+          { message: query },
           {
             timeout: 15000,
             headers: {
@@ -130,8 +131,6 @@ class RealEstateService {
     try {
       const response = await this.axios.get(`/property/${propertyId}/amenities`);
       const data = response.data;
-
-      console.log('✅ Amenities response received');
 
       const amenitiesData = data.data && data.data.amenities ? data.data.amenities : data.amenities;
       
@@ -184,7 +183,6 @@ class RealEstateService {
     }
   }
 
-  // Utility methods
   standardizeResponse(data) {
     return {
       status: data.status || 'success',
@@ -212,7 +210,5 @@ class RealEstateService {
   }
 }
 
-// Create and export singleton instance
 const realEstateService = new RealEstateService();
-
 export default realEstateService;
