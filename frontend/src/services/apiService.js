@@ -3,9 +3,13 @@ import API_CONFIG from '../config/api';
 
 class ApiService {
   constructor() {
-    this.baseURL = API_CONFIG.baseURL;
-    this.timeout = API_CONFIG.timeout;
-    this.headers = API_CONFIG.headers;
+    // Use deployed backend URL
+    this.baseURL = process.env.REACT_APP_API_BASE_URL || 'https://real-estate-agent1-2.onrender.com/api';
+    this.timeout = API_CONFIG?.timeout || 15000;
+    this.headers = API_CONFIG?.headers || {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
   }
 
   async makeRequest(url, options = {}) {
@@ -54,38 +58,36 @@ class ApiService {
 
   // Health check endpoint
   async checkHealth() {
-    return this.makeRequest(API_CONFIG.endpoints.health, {
+    return this.makeRequest('/health', {
       method: 'GET',
     });
   }
 
-  // Send chat message - This matches your backend's expected format
-  async sendMessage(query) {
-    return this.makeRequest(API_CONFIG.endpoints.chat, {
+  // Send chat message - Backend expects 'message' not 'query'
+  async sendMessage(message) {
+    return this.makeRequest('/chat', {
       method: 'POST',
-      body: JSON.stringify({ query }), // Your backend expects 'query', not 'message'
+      body: JSON.stringify({ message }), // Fixed: use 'message' to match updated backend
     });
   }
 
   // Get property details
   async getPropertyDetails(propertyId) {
-    return this.makeRequest(`${API_CONFIG.endpoints.property}/${propertyId}`, {
+    return this.makeRequest(`/property/${propertyId}`, {
       method: 'GET',
     });
   }
 
   // Get property amenities
   async getPropertyAmenities(propertyId) {
-    const url = API_CONFIG.endpoints.propertyAmenities.replace('{id}', propertyId);
-    return this.makeRequest(url, {
+    return this.makeRequest(`/property/${propertyId}/amenities`, {
       method: 'GET',
     });
   }
 
   // Handle property negotiation
   async negotiateProperty(propertyId, offerAmount) {
-    const url = API_CONFIG.endpoints.negotiate.replace('{id}', propertyId);
-    return this.makeRequest(url, {
+    return this.makeRequest(`/property/${propertyId}/negotiate`, {
       method: 'POST',
       body: JSON.stringify({ offer: offerAmount }),
     });
@@ -93,8 +95,7 @@ class ApiService {
 
   // Close property deal
   async closeDeal(propertyId, dealData = {}) {
-    const url = API_CONFIG.endpoints.closeDeal.replace('{id}', propertyId);
-    return this.makeRequest(url, {
+    return this.makeRequest(`/property/${propertyId}/close-deal`, {
       method: 'POST',
       body: JSON.stringify(dealData),
     });
