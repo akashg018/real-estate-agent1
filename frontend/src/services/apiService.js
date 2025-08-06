@@ -1,15 +1,16 @@
 // src/services/apiService.js
-import API_CONFIG from '../config/api';
 
 class ApiService {
   constructor() {
-    // Use deployed backend URL
-    this.baseURL = process.env.REACT_APP_API_BASE_URL || 'https://real-estate-agent1-2.onrender.com/api';
-    this.timeout = API_CONFIG?.timeout || 15000;
-    this.headers = API_CONFIG?.headers || {
+    // HARDCODED API URL - No environment variables needed
+    this.baseURL = 'https://real-estate-agent1-2.onrender.com/api';
+    this.timeout = 15000;
+    this.headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     };
+    
+    console.log('🔧 API Service configured with hardcoded URL:', this.baseURL);
   }
 
   async makeRequest(url, options = {}) {
@@ -63,11 +64,11 @@ class ApiService {
     });
   }
 
-  // Send chat message - Backend expects 'message' not 'query'
+  // Send chat message
   async sendMessage(message) {
     return this.makeRequest('/chat', {
       method: 'POST',
-      body: JSON.stringify({ message }), // Fixed: use 'message' to match updated backend
+      body: JSON.stringify({ message }),
     });
   }
 

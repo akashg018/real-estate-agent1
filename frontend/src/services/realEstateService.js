@@ -1,9 +1,9 @@
 import axios from 'axios';
 
-// FIXED: Ensure API base URL includes the /api prefix
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://real-estate-agent1-2.onrender.com/api';
+// HARDCODED API URL - No environment variables needed
+const API_BASE_URL = 'https://real-estate-agent1-2.onrender.com/api';
 
-console.log('🔧 API Base URL configured:', API_BASE_URL);
+console.log('🔧 API Base URL configured (HARDCODED):', API_BASE_URL);
 
 class RealEstateService {
   constructor() {
@@ -72,7 +72,7 @@ class RealEstateService {
   async checkHealth() {
     try {
       console.log('🏥 Checking health...');
-      const response = await this.axios.get('/health'); // This will become /api/health
+      const response = await this.axios.get('/health');
       return response.data;
     } catch (error) {
       console.error('💔 Health check failed:', error);
@@ -92,7 +92,6 @@ class RealEstateService {
         console.log(`⏳ Attempt ${retryCount + 1} of ${maxRetries}`);
         const startTime = Date.now();
         
-        // This will become /api/chat with the corrected base URL
         const response = await this.axios.post('/chat', 
           { message: query },
           {
